@@ -1,0 +1,52 @@
+# .github/workflows/build.yml
+name: Train CNN Model
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'          # only trigger when model code changes
+      - 'pipelines/**'
+ 
+permissions:
+  id-token: write         # required for OIDC
+  contents: read
+ 
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - name: Configure AWS via OIDC (no passwords!)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_BUILD_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+ 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+ 
+      - name: Install SageMaker SDK
+        run: pip install -r requirements.txt
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION \
+          | docker login --username AWS --password-stdin \
+          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Build and push training image
+        run: |
+          docker build -t cnn-training -f docker/dockerfile.train .
+          docker tag cnn-training ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/cnn-training:latest
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/cnn-training:latest
+ 
+      - name: Run SageMaker Pipeline
+        run: python pipelines/cnn_pipeline.py
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}

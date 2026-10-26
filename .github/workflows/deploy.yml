@@ -1,0 +1,42 @@
+# .github/workflows/deploy.yml
+name: Deploy CNN Model
+on:
+  workflow_dispatch:      # triggered by Lambda after model approval
+    inputs:
+      model_package_arn:
+        description: 'ARN of approved model package'
+        required: true
+ 
+permissions:
+  id-token: write
+  contents: read
+
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_BUILD_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - run: pip install sagemaker boto3
+      - name: Deploy to staging
+        run: python scripts/deploy.py --stage staging --model-arn ${{ inputs.model_package_arn }}
+      - name: Run smoke tests
+        run: python scripts/smoke_test.py --endpoint cnn-staging
+ 
+  deploy-production:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production   # pauses here — waits for your manual approval
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_BUILD_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - run: pip install sagemaker boto3
+      - name: Deploy to production
+        run: python scripts/deploy.py --stage production --model-arn ${{ inputs.model_package_arn }}
